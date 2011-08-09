@@ -1,0 +1,135 @@
+#!/usr/bin/env ruby
+require 'rubygems'
+require 'json'
+require 'action_mailer'
+
+def email_with_domain(username)
+  "#{username.strip}@#{ENV['AUTOSCALE_EMAIL_DOMAIN']}"
+end
+
+SENDER = email_with_domain(ENV['AUTOSCALE_SENDER_EMAIL'])
+RECIPIENTS = ENV['AUTOSCALE_EMAIL_RECIPIENTS'].split(',').map do |username|
+  email_with_domain(username)
+end
+
+ActionMailer::Base.delivery_method = :smtp
+ActionMailer::Base.smtp_settings = {
+  :address              => "smtp.gmail.com",
+  :port                 => 587,
+  :domain               => ENV['AUTOSCALE_EMAIL_DOMAIN'],
+  :user_name            => SENDER,
+  :password             => ENV['AUTOSCALE_SENDER_PASS'],
+  :authentication       => 'plain',
+  :enable_starttls_auto => true
+}
+
+class AutoscaleMailer < ActionMailer::Base
+  def notification(subject, message, log_csv=nil)
+    if log_csv
+      attachment_name = log_csv.split('/')[-1]
+      attachments[attachment_name] = File.read(log_csv)
+    end
+    mail(:to => RECIPIENTS, :from => SENDER, :subject => subject, :body => message)
+  end
+end
+
+app_name = ARGV[0]
+has_heroku = !`which heroku`.empty?
+heroku_command = has_heroku ? 'heroku' : 'ruby -lrubygems /var/lib/gems/1.8/gems/heroku-2.4.0/bin/heroku'
+log_path = has_heroku ? '' : '/home/ubuntu/heroku_autoscale/log/'
+
+#You must configure this
+heroku_app_id = 0 #Your heroku app id goes here
+newrelic_api_key = 'xxxx' #Your newrelic api key goes here
+
+#You could configure this
+interval_minutes = 3
+min_ratio, max_ratio = 0.72, 0.85
+avg_ratio = (max_ratio + min_ratio) / 2.0
+min_dynos = 12 # it will never go below 12 dynos. It might be too much for your application 
+pessimism = 0.8 # 1 is max, 0 is min
+
+relic = {
+ "begin" => "2100-07-27T00:00:00Z",
+ "end" => "2100-07-27T00:#{"%02i" % interval_minutes}:00Z",
+ "metric_type" => "Instance/Busy",
+ "fields" => "busy_percent",
+ "summary_mode" => 1,
+ "app_id" => heroku_app_id,
+ "api_key" => newrleic_api_key
+}
+
+today = Time.now.strftime("%Y-%m-%d")
+log_file = "#{log_path}#{app_name}_autoscale_log_#{today}.csv"
+
+unless File.exist? log_file
+  yesterday = (Time.now - 86400).strftime("%Y-%m-%d")
+  yesterday_log_file = "#{log_path}#{app_name}_autoscale_log_#{yesterday}.csv"
+  if File.exist? yesterday_log_file
+    message = "Attached is the history of dyno changes for #{yesterday}! Enjoy~ : )"
+    AutoscaleMailer.notification("Heroku Autoscale: Summary for #{yesterday}", message, yesterday_log_file).deliver
+  end
+  File.open(log_file, 'w') do |f|
+    f.write("time_executed,from_dynos,to_dynos,workers,relic_busy_percent(dynos+workers),from_dynos_actual_usage\n") 
+  end
+end
+
+puts "Starting Heroku autoscale for #{app_name}..."
+puts ''
+time_set = 0
+
+def try_run!(cmd_string)
+  output = `#{cmd_string}`
+  raise Exception if output.nil? || output.empty?
+  output
+end
+
+puts "[#{Time.now}]"
+puts "Fetching last #{interval_minutes} minutes load busy percentage from NewRelic..."
+heroku_output = nil
+begin
+  relic_call = `curl --silent -H \"x-api-key:#{relic['api_key']}\" -d \"metrics[]=#{relic['metric_type']}\" -d \"field=#{relic['fields']}\" -d \"begin=#{relic['begin']}\" -d \"end=#{relic['end']}\" -d \"summary=#{relic['summary_mode']}\" https://api.newrelic.com/api/v1/applications/#{relic['app_id']}/data.json`
+	parsed = JSON.parse(relic_call)
+  load_ratio = (parsed[0]['busy_percent'] + (20.0 * pessimism))/100
+
+  heroku_output = try_run!("#{heroku_command} dynos --app #{app_name}")
+	current_dynos = heroku_output.match(/\d+/)[0].to_i
+
+	heroku_output = try_run!("#{heroku_command} workers --app #{app_name}")
+	current_workers = heroku_output.match(/\d+/)[0].to_i
+  dynos_load_ratio = (load_ratio/(current_dynos.to_f/(current_dynos+current_workers))) * pessimism
+
+	puts "Current dynos: #{current_dynos}"
+	puts "Current workers: #{current_workers}"
+
+	puts "Instance Usage (dynos+workers): %.2f%%" % (load_ratio*100.0)
+	puts "Current dyno load: %.2f%%" % (dynos_load_ratio * 100)
+
+	used_dynos = current_dynos*dynos_load_ratio
+
+  should_dynos = (used_dynos/avg_ratio).ceil
+  should_dynos = min_dynos if should_dynos < min_dynos
+  should_dynos = 100 if should_dynos > 100
+
+  puts "Amount of dynos to reach the %.2f%% of target load: #{should_dynos}" % (avg_ratio * 100)
+  time_set = Time.now
+	if dynos_load_ratio > max_ratio || dynos_load_ratio < min_ratio
+	  if should_dynos != current_dynos
+      heroku_output = try_run!("#{heroku_command} dynos #{should_dynos} --app #{app_name}")
+      puts "#{app_name} dynos adjusted to #{should_dynos}"
+      File.open(log_file, 'a') do |f|
+  		  f.write("#{Time.now},#{current_dynos},#{should_dynos},#{current_workers},#{parsed[0]['busy_percent']},#{dynos_load_ratio*100}\n")
+  		end
+    else
+      puts "#{app_name} already has this amount of dynos set. Skipping."
+    end
+	else
+	  puts "#{app_name} current load is between our acceptance range(%.2f%%-%.2f%%), no change needed." % [min_ratio*100, max_ratio*100]
+  end
+	puts ''
+
+rescue Exception => e
+  message = "\nSomething has failed!\nNew Relic response: #{parsed.inspect}.\nHeroku Commands: #{"FAILED" if heroku_output.nil? || heroku_output.empty?}\nException: #{e.class} #{e.message} \nerror:\n#{e.backtrace.join("\n")}\n"
+  puts message
+  AutoscaleMailer.notification("AUTOSCALE SCRIPT ERROR", message).deliver
+end
