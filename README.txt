@@ -13,16 +13,16 @@ Heroku Autoscale
 
 
 2. HOW TO USE
-  2.1 Standalone: run `./autoscale <HEROKU_APP_NAME>`
+  2.1 Standalone: run `source autoscale_conf; ./autoscale <HEROKU_APP_NAME>`
       Examples:
-      $ ./autoscale viki-staging
-      $ ./autoscale viki-production
+      $ source autoscale_conf; ./autoscale viki-staging
+      $ source autoscale_conf; ./autoscale viki-production
   2.2 Configure Crontab to run the script every 3 minutes
       $ crontab -e
       Add the following line:
-      */3 * * * * `source /autoscale_root_folder/autoscale_conf; /autoscale_root_folder/autoscale app_name >> some_log`
+      */3 * * * * `. /autoscale_root_folder/autoscale_conf; /autoscale_root_folder/autoscale app_name >> some_log`
       Example:
-      */3 * * * * `source /home/username/heroku_autoscale/autoscale_conf; /home/username/heroku_autoscale/autoscale my_heroku_app >> /home/username/heroku_autoscale/autoscale.log`
+      */3 * * * * `. /home/username/heroku_autoscale/autoscale_conf; /home/username/heroku_autoscale/autoscale my_heroku_app >> /home/username/heroku_autoscale/autoscale.log`
        (Note: Backticks are used so that Crontab can run commands that contain white spaces.)
 
 
