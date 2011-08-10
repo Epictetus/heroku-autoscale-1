@@ -5,24 +5,24 @@ Heroku Autoscale
   1.2 Install ruby, rubygems and heroku version 2.4
       $ sudo apt-get install ruby rubygems
       $ sudo gem install heroku -v 2.4
-  1.3 Export credentials for email notifications. The emails can only be sent for the same domain.
-      $ export AUTOSCALE_EMAIL_DOMAIN="domain.com"
-      $ export AUTOSCALE_SENDER_EMAIL="email"
-      $ export AUTOSCALE_SENDER_PASS="somepass"
-      $ export AUTOSCALE_EMAIL_RECIPIENTS="me,you,we"
-  1.4 Set your heroku app id and newrelic api key in the script
-      look for the line that starts with heroku_app_id and replace 0 with your app id
-      look for the line that starts with newrelic_api_key and replace 'xxxx' with your api key
+  1.3 Ensure heroku credentials file is configured in ~/.heroku/credentials
+      Also, ensure that public/private key pair is setup for the heroku app.
+  1.4 Edit autoscale_conf file according to your heroku application configuration
+  1.5 Ensure that autoscale script is executable
+      chmod +x autoscale
 
 
 2. HOW TO USE
-  2.1 run `./autoscale [APP_NAME]`
+  2.1 Standalone: run `./autoscale <HEROKU_APP_NAME>`
       Examples:
       $ ./autoscale viki-staging
-       $ ./autoscale viki-production
+      $ ./autoscale viki-production
   2.2 Configure Crontab to run the script every 3 minutes
-       $ crontab -e
-       */3 * * * * `/autoscale_root_folder/autoscale app_name >> some_log`
+      $ crontab -e
+      Add the following line:
+      */3 * * * * `source /autoscale_root_folder/autoscale_conf; /autoscale_root_folder/autoscale app_name >> some_log`
+      Example:
+      */3 * * * * `source /home/username/heroku_autoscale/autoscale_conf; /home/username/heroku_autoscale/autoscale my_heroku_app >> /home/username/heroku_autoscale/autoscale.log`
        (Note: Backticks are used so that Crontab can run commands that contain white spaces.)
 
 
@@ -41,6 +41,7 @@ Heroku Autoscale
 
 5. AUTHORS
   - Adrian Cheng adrian@viki.com
+  - Albert Callarisa Roca albert@viki.com
   - Nia Mutiara nia@viki.com
 
 Explanation for PESSIMISM variable

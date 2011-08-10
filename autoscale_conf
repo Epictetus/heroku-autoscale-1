@@ -1,0 +1,7 @@
+# Change these values
+export AUTOSCALE_EMAIL_DOMAIN="domain.com"
+export AUTOSCALE_SENDER_EMAIL="email"
+export AUTOSCALE_SENDER_PASS="somepass"
+export AUTOSCALE_EMAIL_RECIPIENTS="me,you,we"
+export NEWRELIC_APP_ID="your app id here"
+export NEWRELIC_API_KEY="your api key here"
